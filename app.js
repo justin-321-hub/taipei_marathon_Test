@@ -58,8 +58,8 @@ function render() {
     const avatar = document.createElement('img');
     avatar.className = 'avatar';
     avatar.src = isUser
-      ? 'https://raw.githubusercontent.com/justin-321-hub/fourleaf/refs/heads/main/assets/user-avatar.png'
-      : 'https://raw.githubusercontent.com/justin-321-hub/fourleaf/refs/heads/main/assets/bot-avatar.png';
+      ? 'https://raw.githubusercontent.com/justin-321-hub/taipei_marathon/refs/heads/main/assets/user-avatar.png'
+      : 'https://raw.githubusercontent.com/justin-321-hub/taipei_marathon/refs/heads/main/assets/bot-avatar.png';
     avatar.alt = isUser ? 'you' : 'bot';
 
     // 泡泡
@@ -147,12 +147,13 @@ elInput.addEventListener('keydown', (e) => {
 messages.push({
   id: uid(),
   role: 'assistant',
-  text: `歡迎來到渣打馬拉松智慧客服！
+  text: `歡迎來到台北馬拉松智慧客服！
 無論您是第一次參賽的新手，還是追求突破的資深跑者，這裡都有您需要的資訊與貼心建議。
 從報名、訓練、裝備選擇，到比賽當天的實用小貼士與恢復方法，我們都會用最專業的知識，陪伴您一路向前，衝向終點！`,
   ts: Date.now()
 });
 render();
+
 
 
 
