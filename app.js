@@ -1,4 +1,3 @@
-
 /**
  * app.js — 前端純 JS 聊天室邏輯（無框架）
  * ---------------------------------------------------------
@@ -163,6 +162,11 @@ async function sendText(text) {
 
     // HTTP 狀態非 2xx 時，直接丟錯
     if (!res.ok) {
+      // ★ 新增：特別處理 502 / 404
+      if (res.status === 502 || res.status === 404) {
+        throw new Error("網路不穩定，請再試一次!");
+      }
+
       // 優先使用後端提供的錯誤訊息欄位
       const serverMsg =
         (data && (data.error || data.body || data.message)) ?? raw ?? "unknown error";
@@ -211,7 +215,7 @@ async function sendText(text) {
       // 若使用者裝置離線，提供更直覺提示
       (!navigator.onLine && "目前處於離線狀態，請檢查網路連線後再試一次") ||
       // 其他錯誤，帶上簡短錯誤說明
-      `取得回覆時發生錯誤：${err?.message || err}`;
+      `${err?.message || err}`;//取得回覆時發生錯誤：
 
     const botErr = {
       id: uid(),
@@ -253,7 +257,6 @@ messages.push({
   ts: Date.now(),
 });
 render();
-
 
 
 
