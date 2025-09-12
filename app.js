@@ -181,12 +181,13 @@ async function sendText(text) {
      * 3) 若是空物件 {} → 顯示「網路不穩定，請再試一次」
      * 4) 其他物件 → JSON 字串化後顯示（利於除錯）
      */
-    let replyText;
-    if (typeof data === "string") {
-      replyText = data.trim() || "（空白回覆）";
-    } else if (data && (data.text || data.message)) {
-      replyText = String(data.text || data.message);
-    } else {
+      let replyText;
+      if (typeof data === "string") {
+        replyText = data.trim() || "請換個說法，謝謝您";
+     } else if (data && (data.text || data.message)) {
+      const originalText = String(data.text || data.message);
+        replyText = originalText.trim() || "請換個說法，謝謝您";
+     } else {
       // data 不是字串，也沒有 text/message 欄位
       const isPlainEmptyObject =
         data &&
@@ -257,6 +258,7 @@ messages.push({
   ts: Date.now(),
 });
 render();
+
 
 
 
