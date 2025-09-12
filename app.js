@@ -1,3 +1,4 @@
+
 /**
  * app.js — 前端純 JS 聊天室邏輯（無框架）
  * ---------------------------------------------------------
@@ -8,6 +9,8 @@
  * 4) 呼叫後端 /api/chat，強化回應解析與錯誤處理
  * 5) ★ 修正：當 text 為空字串時，顯示「請換個說法，謝謝您」
  * 6) ★ 新增：傳送到後端之前，刪除所有輸入文字的問號
+ *    - 若問號在句尾，直接刪除
+ *    - 若問號不在句尾，刪除後加入換行
  *
  * 依賴：
  * - 頁面需有以下元素：
@@ -84,6 +87,35 @@ function setThinking(on) {
   }
 }
 
+/**
+ * ★ 新增：智能處理問號
+ * - 句尾的問號：直接刪除
+ * - 句中的問號：替換為換行
+ * @param {string} text - 原始文字
+ * @returns {string} - 處理後的文字
+ */
+function processQuestionMarks(text) {
+  let result = text;
+  
+  // 先處理句尾的問號（包含可能的空白）
+  // 匹配結尾的問號（半形或全形），可能跟著空白字符
+  result = result.replace(/[?？]\s*$/g, '');
+  
+  // 再處理句中的問號
+  // 將非結尾的問號替換為換行
+  // 注意：這裡使用前瞻斷言來確保問號後面還有字符
+  result = result.replace(/[?？](?=.)/g, '\n');
+  
+  // 清理多餘的換行和空白
+  // 將多個連續換行合併為一個
+  result = result.replace(/\n\s*\n/g, '\n');
+  
+  // 去除首尾空白
+  result = result.trim();
+  
+  return result;
+}
+
 /* =========================
    將 messages 渲染到畫面（移除語音播放按鈕）
    ========================= */
@@ -129,9 +161,8 @@ async function sendText(text) {
   const content = (text ?? elInput?.value ?? "").trim();
   if (!content) return;
 
-  // ★ 新增：刪除所有問號（包括全形問號）
-  // 這裡使用正則表達式來移除所有問號字符
-  const contentToSend = content.replace(/[?？]/g, '');
+  // ★ 新增：使用智能問號處理函數
+  const contentToSend = processQuestionMarks(content);
   
   // 先插入使用者訊息到畫面（顯示原始內容，包含問號）
   const userMsg = { id: uid(), role: "user", text: content, ts: Date.now() };
@@ -143,7 +174,7 @@ async function sendText(text) {
   setThinking(true);
 
   try {
-    // 呼叫後端 /api/chat（傳送已刪除問號的內容）
+    // 呼叫後端 /api/chat（傳送已處理問號的內容）
     const res = await fetch(api("/api/chat"), {
       method: "POST",
       headers: {
@@ -151,7 +182,7 @@ async function sendText(text) {
         "X-Client-Id": clientId,
       },
       body: JSON.stringify({ 
-        text: contentToSend,  // ★ 使用已刪除問號的內容
+        text: contentToSend,  // ★ 使用已處理問號的內容
         clientId, 
         language: "繁體中文" 
       }),
