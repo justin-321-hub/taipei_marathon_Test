@@ -181,24 +181,24 @@ async function sendText(text) {
      * 3) 若是空物件 {} → 顯示「網路不穩定，請再試一次」
      * 4) 其他物件 → JSON 字串化後顯示（利於除錯）
      */
-      let replyText;
-      if (typeof data === "string") {
+     let replyText;
+     if (typeof data === "string") {
         replyText = data.trim() || "請換個說法，謝謝您";
-     } else if (data && (data.text || data.message)) {
-      const originalText = String(data.text || data.message);
-        replyText = originalText.trim() || "請換個說法，謝謝您";
+     } else if (data && typeof data === "object") {
+        // 檢查是否有 text 或 message 欄位
+        if (data.hasOwnProperty('text') || data.hasOwnProperty('message')) {
+           const originalText = String(data.text || data.message || "");
+           replyText = originalText.trim() || "請換個說法，謝謝您";
+        } else {
+           // data 不是字串，也沒有 text/message 欄位
+           const isPlainEmptyObject = Object.keys(data).length === 0;
+           replyText = isPlainEmptyObject
+              ? "網路不穩定，請再試一次"
+              : JSON.stringify(data, null, 2); // 顯示完整物件，便於除錯
+        }
      } else {
-      // data 不是字串，也沒有 text/message 欄位
-      const isPlainEmptyObject =
-        data &&
-        typeof data === "object" &&
-        !Array.isArray(data) &&
-        Object.keys(data).length === 0;
-
-      replyText = isPlainEmptyObject
-        ? "網路不穩定，請再試一次" // ★ 新增規則
-        : JSON.stringify(data, null, 2); // 顯示完整物件，便於除錯
-    }
+        replyText = "請換個說法，謝謝您";
+     }
 
     // 推入機器人訊息
     const botMsg = { id: uid(), role: "assistant", text: replyText, ts: Date.now() };
@@ -258,6 +258,7 @@ messages.push({
   ts: Date.now(),
 });
 render();
+
 
 
 
