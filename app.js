@@ -153,7 +153,7 @@ async function sendText(text) {
         text: contentToSend, 
         clientId, 
         language: "繁體中文",
-        role: "text"
+        role: "test"
       }),
     });
 
