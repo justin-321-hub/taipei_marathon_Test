@@ -88,7 +88,7 @@ function render() {
   elMessages.innerHTML = "";
 
   for (const m of messages) {
-    const isUser = m.role === "user";
+    const isUser = m.role === "test";
 
     // 外層一列
     const row = document.createElement("div");
