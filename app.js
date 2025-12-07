@@ -7,7 +7,7 @@
 /* =========================
    後端 API 網域
    ========================= */
-const API_BASE = "https://taipei-marathon-server-test.onrender.com";
+const API_BASE = "https://taipei-marathon-server.onrender.com";
 const api = (p) => `${API_BASE}${p}`;
 
 /* =========================
@@ -88,7 +88,7 @@ function render() {
   elMessages.innerHTML = "";
 
   for (const m of messages) {
-    const isUser = m.role === "user";
+    const isUser = m.role === "test";
 
     // 外層一列
     const row = document.createElement("div");
