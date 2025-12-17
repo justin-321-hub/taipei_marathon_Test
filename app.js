@@ -1,5 +1,5 @@
 /**
- * app.js — 前端純 JS 聊天室邏輯（已修改支援 n8n HTML 回傳 + 重試機制 + 檢測未完成回應）
+ * app.js — 前端純 JS 聊天室邏輯（獨立錯誤計數器版本）
  */
 
 "use strict";
@@ -114,11 +114,8 @@ function render() {
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     if (isUser) {
-      // ★ 使用者訊息：為了安全，必須轉義 HTML，並將換行轉為 <br>
       bubble.innerHTML = escapeHtml(m.text).replace(/\n/g, '<br>');
     } else {
-      // ★★★ 機器人訊息關鍵修改 ★★★
-      // 直接渲染後端回傳的 HTML，不進行轉義。
       bubble.innerHTML = m.text;
     }
 
@@ -131,16 +128,29 @@ function render() {
 }
 
 /* =========================
-   呼叫後端邏輯 (含重試機制)
+   呼叫後端邏輯 (獨立錯誤計數器)
 ========================= */
-async function sendText(text, retryCount = 0) {
+async function sendText(text, retryCounts = {}) {
   const content = (text ?? elInput?.value ?? "").trim();
   if (!content) return;
 
   const contentToSend = processQuestionMarks(content);
 
+  // 初始化重試計數器
+  if (!retryCounts.emptyResponse) retryCounts.emptyResponse = 0;
+  if (!retryCounts.incompleteMarkers) retryCounts.incompleteMarkers = 0;
+  if (!retryCounts.httpErrors) retryCounts.httpErrors = 0;
+  if (!retryCounts.jsonParseError) retryCounts.jsonParseError = 0;
+
+  // 判斷是否為第一次請求
+  const isFirstRequest = 
+    retryCounts.emptyResponse === 0 && 
+    retryCounts.incompleteMarkers === 0 && 
+    retryCounts.httpErrors === 0 &&
+    retryCounts.jsonParseError === 0;
+
   // 只在第一次呼叫時顯示使用者訊息並清空輸入框
-  if (retryCount === 0) {
+  if (isFirstRequest) {
     const userMsg = { id: uid(), role: "user", text: content, ts: Date.now() };
     messages.push(userMsg);
     if (elInput) elInput.value = "";
@@ -166,15 +176,63 @@ async function sendText(text, retryCount = 0) {
 
     const raw = await res.text();
     let data;
+    let jsonParseSuccess = true;
+    
     try {
       data = raw ? JSON.parse(raw) : {};
     } catch {
+      jsonParseSuccess = false;
       data = { errorRaw: raw };
     }
 
-    // ★★★ 處理狀態碼 200 但回應異常的情況 ★★★
+    // ★★★ 6. JSON 解析錯誤處理 ★★★
+    if (!jsonParseSuccess && retryCounts.jsonParseError === 0) {
+      retryCounts.jsonParseError++;
+      setThinking(false);
+      const retryMsg = {
+        id: uid(),
+        role: "assistant",
+        text: "正在為您重新詢問。",
+        ts: Date.now(),
+      };
+      messages.push(retryMsg);
+      render();
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return sendText(content, retryCounts);
+    }
+    
+    if (!jsonParseSuccess && retryCounts.jsonParseError >= 1) {
+      throw new Error("抱歉，現在網路不穩定，請稍後再試一次。");
+    }
+
+    // ★★★ 3. HTTP 500/502/503/504/401/404 錯誤處理 ★★★
+    const commonHttpErrors = [500, 502, 503, 504, 401, 404];
+    if (commonHttpErrors.includes(res.status)) {
+      if (retryCounts.httpErrors === 0) {
+        retryCounts.httpErrors++;
+        setThinking(false);
+        const retryMsg = {
+          id: uid(),
+          role: "assistant",
+          text: "網路不穩定，正在為您重新詢問。",
+          ts: Date.now(),
+        };
+        messages.push(retryMsg);
+        render();
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return sendText(content, retryCounts);
+      } else {
+        throw new Error("抱歉，現在網路不穩定，請稍後再試一次。");
+      }
+    }
+
+    // ★★★ 4. 其他 HTTP 錯誤 ★★★
+    if (!res.ok) {
+      throw new Error("抱歉，現在網路不穩定，請稍後再試一次。");
+    }
+
+    // ★★★ 1. HTTP 200 空回應錯誤處理 ★★★
     if (res.status === 200) {
-      // 檢查是否為空物件或無效回應
       let isEmptyResponse = false;
       
       if (typeof data === "object" && data !== null) {
@@ -193,8 +251,8 @@ async function sendText(text, retryCount = 0) {
         }
       }
 
-      // 如果偵測到空回應且尚未重試過
-      if (isEmptyResponse && retryCount === 0) {
+      if (isEmptyResponse && retryCounts.emptyResponse === 0) {
+        retryCounts.emptyResponse++;
         setThinking(false);
         const retryMsg = {
           id: uid(),
@@ -204,24 +262,13 @@ async function sendText(text, retryCount = 0) {
         };
         messages.push(retryMsg);
         render();
-        
-        // 延遲 500ms 後重試
-        await new Promise(resolve => setTimeout(resolve, 500));
-        return sendText(content, retryCount + 1);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return sendText(content, retryCounts);
       }
       
-      // 如果是第二次失敗
-      if (isEmptyResponse && retryCount === 1) {
+      if (isEmptyResponse && retryCounts.emptyResponse >= 1) {
         throw new Error("抱歉，現在網路不穩定，請稍後再試一次。");
       }
-    }
-
-    if (!res.ok) {
-      if (res.status === 502 || res.status === 404) {
-        throw new Error("網路不穩定，請再試一次!");
-      }
-      const serverMsg = (data && (data.error || data.body || data.message)) ?? raw ?? "unknown error";
-      throw new Error(`HTTP ${res.status} ${res.statusText} — ${serverMsg}`);
     }
 
     // 整理回覆文字 (HTML)
@@ -251,8 +298,9 @@ async function sendText(text, retryCount = 0) {
       replyText = "請換個說法，謝謝您";
     }
 
-    // ★★★ 新增：檢查回應中是否包含 "Search Results" 和 "Html" ★★★
-    if (containsIncompleteMarkers(replyText) && retryCount === 0) {
+    // ★★★ 2. 後端未完成處理錯誤 ★★★
+    if (containsIncompleteMarkers(replyText) && retryCounts.incompleteMarkers === 0) {
+      retryCounts.incompleteMarkers++;
       setThinking(false);
       const thinkingMsg = {
         id: uid(),
@@ -262,14 +310,22 @@ async function sendText(text, retryCount = 0) {
       };
       messages.push(thinkingMsg);
       render();
-      
-      // 延遲 1000ms 後重試
       await new Promise(resolve => setTimeout(resolve, 1000));
-      return sendText(content, retryCount + 1);
+      return sendText(content, retryCounts);
     }
 
-    // 如果第二次仍然包含未完成標記，還是顯示回應（避免無限等待）
-    // 但這裡不額外處理，直接顯示收到的內容
+    if (containsIncompleteMarkers(replyText) && retryCounts.incompleteMarkers >= 1) {
+      setThinking(false);
+      const errorMsg = {
+        id: uid(),
+        role: "assistant",
+        text: "抱歉，現在網路不穩定，請稍後再試一次。",
+        ts: Date.now(),
+      };
+      messages.push(errorMsg);
+      render();
+      return;
+    }
 
     // 推入機器人訊息
     const botMsg = { id: uid(), role: "assistant", text: replyText, ts: Date.now() };
@@ -279,7 +335,21 @@ async function sendText(text, retryCount = 0) {
 
   } catch (err) {
     setThinking(false);
-    const friendly = (!navigator.onLine && "目前處於離線狀態，請檢查網路連線後再試一次") || `${err?.message || err}`;
+    
+    // ★★★ 5. 離線狀態檢查 ★★★
+    if (!navigator.onLine) {
+      const offlineMsg = {
+        id: uid(),
+        role: "assistant",
+        text: "目前處於離線狀態，請檢查網路連線後再試一次",
+        ts: Date.now(),
+      };
+      messages.push(offlineMsg);
+      render();
+      return;
+    }
+    
+    const friendly = `${err?.message || err}`;
     const botErr = {
       id: uid(),
       role: "assistant",
