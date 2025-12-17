@@ -1,6 +1,6 @@
 /**
-* app.js — 前端純 JS 聊天室邏輯（已修改支援 n8n HTML 回傳 + 自動重試機制）
-*/
+ * app.js — 前端純 JS 聊天室邏輯（已修改支援 n8n HTML 回傳 + 重試機制）
+ */
 
 "use strict";
 
@@ -45,8 +45,8 @@ function scrollToBottom() {
 }
 
 /**
-* 切換「思考中」動畫
-*/
+ * 切換「思考中」動畫
+ */
 function setThinking(on) {
   if (!elThinking) return;
   if (on) {
@@ -62,8 +62,8 @@ function setThinking(on) {
 }
 
 /**
-* 智能處理問號 (針對使用者輸入)
-*/
+ * 智能處理問號 (針對使用者輸入)
+ */
 function processQuestionMarks(text) {
   let result = text;
   result = result.replace(/[?？]\s*$/g, '');
@@ -73,8 +73,8 @@ function processQuestionMarks(text) {
 }
 
 /**
-* HTML 轉義 (防止 XSS)
-*/
+ * HTML 轉義 (防止 XSS)
+ */
 function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
@@ -87,14 +87,12 @@ function escapeHtml(text) {
 function render() {
   if (!elMessages) return;
   elMessages.innerHTML = "";
-  
   for (const m of messages) {
     const isUser = m.role === "user";
-    
     // 外層一列
     const row = document.createElement("div");
     row.className = `msg ${isUser ? "user" : "bot"}`;
-    
+
     // 頭像
     const avatar = document.createElement("img");
     avatar.className = "avatar";
@@ -102,47 +100,46 @@ function render() {
       ? 'https://raw.githubusercontent.com/justin-321-hub/taipei_marathon/refs/heads/main/assets/user-avatar.png'
       : 'https://raw.githubusercontent.com/justin-321-hub/taipei_marathon/refs/heads/main/assets/logo.png';
     avatar.alt = isUser ? "you" : "bot";
-    
+
     // 對話泡泡
     const bubble = document.createElement("div");
     bubble.className = "bubble";
-    
     if (isUser) {
-      // 使用者訊息：轉義 HTML，並將換行轉為 <br>
+      // ★ 使用者訊息：為了安全，必須轉義 HTML，並將換行轉為 <br>
       bubble.innerHTML = escapeHtml(m.text).replace(/\n/g, '<br>');
     } else {
-      // 機器人訊息：直接渲染後端回傳的 HTML
+      // ★★★ 機器人訊息關鍵修改 ★★★
+      // 直接渲染後端回傳的 HTML，不進行轉義。
       bubble.innerHTML = m.text;
     }
-    
+
     // 組合
     row.appendChild(avatar);
     row.appendChild(bubble);
     elMessages.appendChild(row);
   }
-  
   scrollToBottom();
 }
 
 /* =========================
-   呼叫後端邏輯（含重試機制）
+   呼叫後端邏輯 (含重試機制)
 ========================= */
-async function sendText(text, isRetry = false) {
+async function sendText(text, retryCount = 0) {
   const content = (text ?? elInput?.value ?? "").trim();
   if (!content) return;
-  
+
   const contentToSend = processQuestionMarks(content);
-  
-  // 只在第一次發送時顯示使用者訊息
-  if (!isRetry) {
+
+  // 只在第一次呼叫時顯示使用者訊息並清空輸入框
+  if (retryCount === 0) {
     const userMsg = { id: uid(), role: "user", text: content, ts: Date.now() };
     messages.push(userMsg);
     if (elInput) elInput.value = "";
     render();
   }
-  
+
   setThinking(true);
-  
+
   try {
     const res = await fetch(api("/api/chat"), {
       method: "POST",
@@ -157,7 +154,7 @@ async function sendText(text, isRetry = false) {
         role: "user"
       }),
     });
-    
+
     const raw = await res.text();
     let data;
     try {
@@ -165,17 +162,59 @@ async function sendText(text, isRetry = false) {
     } catch {
       data = { errorRaw: raw };
     }
-    
-    if (!res.ok) {
-      // HTTP 錯誤處理
-      if (res.status === 502 || res.status === 404 || res.status >= 500) {
-        throw new Error("NETWORK_ERROR");
+
+    // ★★★ 新增：處理狀態碼 200 但回應異常的情況 ★★★
+    if (res.status === 200) {
+      // 檢查是否為空物件或無效回應
+      let isEmptyResponse = false;
+      
+      if (typeof data === "object" && data !== null) {
+        const isPlainEmptyObject =
+          !Array.isArray(data) &&
+          Object.keys(data).filter(k => k !== 'clientId').length === 0;
+        
+        const hasTextField = 'text' in data || 'message' in data;
+        if (hasTextField) {
+          const textValue = data.text !== undefined ? data.text : data.message;
+          if (textValue === "" || textValue === null || textValue === undefined) {
+            isEmptyResponse = true;
+          }
+        } else if (isPlainEmptyObject) {
+          isEmptyResponse = true;
+        }
+      }
+
+      // 如果偵測到空回應且尚未重試過
+      if (isEmptyResponse && retryCount === 0) {
+        setThinking(false);
+        const retryMsg = {
+          id: uid(),
+          role: "assistant",
+          text: "網路不穩定，正在為您重新詢問。",
+          ts: Date.now(),
+        };
+        messages.push(retryMsg);
+        render();
+        
+        // 延遲 500ms 後重試
+        await new Promise(resolve => setTimeout(resolve, 500));
+        return sendText(content, retryCount + 1);
       }
       
+      // 如果是第二次失敗
+      if (isEmptyResponse && retryCount === 1) {
+        throw new Error("抱歉，現在網路不穩定，請稍後再試一次。");
+      }
+    }
+
+    if (!res.ok) {
+      if (res.status === 502 || res.status === 404) {
+        throw new Error("網路不穩定，請再試一次!");
+      }
       const serverMsg = (data && (data.error || data.body || data.message)) ?? raw ?? "unknown error";
       throw new Error(`HTTP ${res.status} ${res.statusText} — ${serverMsg}`);
     }
-    
+
     // 整理回覆文字 (HTML)
     let replyText;
     if (typeof data === "string") {
@@ -194,7 +233,7 @@ async function sendText(text, isRetry = false) {
           !Array.isArray(data) &&
           Object.keys(data).filter(k => k !== 'clientId').length === 0;
         if (isPlainEmptyObject) {
-          replyText = "抱歉，現在網路不穩定，請稍後再試一次。";
+          replyText = "網路不穩定，請再試一次";
         } else {
           replyText = JSON.stringify(data, null, 2);
         }
@@ -202,57 +241,24 @@ async function sendText(text, isRetry = false) {
     } else {
       replyText = "請換個說法，謝謝您";
     }
-    
+
     // 推入機器人訊息
     const botMsg = { id: uid(), role: "assistant", text: replyText, ts: Date.now() };
     messages.push(botMsg);
     setThinking(false);
     render();
-    
+
   } catch (err) {
     setThinking(false);
-    
-    // 判斷是否為網路錯誤且尚未重試
-    if (err.message === "NETWORK_ERROR" && !isRetry) {
-      // 第一次錯誤：顯示重試訊息
-      const retryMsg = {
-        id: uid(),
-        role: "assistant",
-        text: "網路不穩定，正在為您重新提問。",
-        ts: Date.now(),
-      };
-      messages.push(retryMsg);
-      render();
-      
-      // 等待 1 秒後重試
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // 重新發送（標記為重試）
-      await sendText(content, true);
-      
-    } else if (err.message === "NETWORK_ERROR" && isRetry) {
-      // 第二次錯誤：顯示最終錯誤訊息
-      const finalErrorMsg = {
-        id: uid(),
-        role: "assistant",
-        text: "網路不穩定，請再試一次。",
-        ts: Date.now(),
-      };
-      messages.push(finalErrorMsg);
-      render();
-      
-    } else {
-      // 其他錯誤
-      const friendly = (!navigator.onLine && "目前處於離線狀態，請檢查網路連線後再試一次") || `${err?.message || err}`;
-      const botErr = {
-        id: uid(),
-        role: "assistant",
-        text: friendly,
-        ts: Date.now(),
-      };
-      messages.push(botErr);
-      render();
-    }
+    const friendly = (!navigator.onLine && "目前處於離線狀態，請檢查網路連線後再試一次") || `${err?.message || err}`;
+    const botErr = {
+      id: uid(),
+      role: "assistant",
+      text: friendly,
+      ts: Date.now(),
+    };
+    messages.push(botErr);
+    render();
   }
 }
 
