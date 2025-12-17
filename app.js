@@ -1,5 +1,5 @@
 /**
- * app.js — 前端純 JS 聊天室邏輯（已修改支援 n8n HTML 回傳 + 重試機制）
+ * app.js — 前端純 JS 聊天室邏輯（已修改支援 n8n HTML 回傳 + 重試機制 + 檢測未完成回應）
  */
 
 "use strict";
@@ -79,6 +79,15 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+/**
+ * 檢查回應是否包含未完成的處理標記
+ */
+function containsIncompleteMarkers(text) {
+  if (typeof text !== 'string') return false;
+  const lowerText = text.toLowerCase();
+  return lowerText.includes('search results') && lowerText.includes('html');
 }
 
 /* =========================
@@ -163,7 +172,7 @@ async function sendText(text, retryCount = 0) {
       data = { errorRaw: raw };
     }
 
-    // ★★★ 新增：處理狀態碼 200 但回應異常的情況 ★★★
+    // ★★★ 處理狀態碼 200 但回應異常的情況 ★★★
     if (res.status === 200) {
       // 檢查是否為空物件或無效回應
       let isEmptyResponse = false;
@@ -241,6 +250,26 @@ async function sendText(text, retryCount = 0) {
     } else {
       replyText = "請換個說法，謝謝您";
     }
+
+    // ★★★ 新增：檢查回應中是否包含 "Search Results" 和 "Html" ★★★
+    if (containsIncompleteMarkers(replyText) && retryCount === 0) {
+      setThinking(false);
+      const thinkingMsg = {
+        id: uid(),
+        role: "assistant",
+        text: "還在思考中，請稍等。",
+        ts: Date.now(),
+      };
+      messages.push(thinkingMsg);
+      render();
+      
+      // 延遲 1000ms 後重試
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return sendText(content, retryCount + 1);
+    }
+
+    // 如果第二次仍然包含未完成標記，還是顯示回應（避免無限等待）
+    // 但這裡不額外處理，直接顯示收到的內容
 
     // 推入機器人訊息
     const botMsg = { id: uid(), role: "assistant", text: replyText, ts: Date.now() };
