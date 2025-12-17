@@ -194,7 +194,7 @@ async function sendText(text, isRetry = false) {
           !Array.isArray(data) &&
           Object.keys(data).filter(k => k !== 'clientId').length === 0;
         if (isPlainEmptyObject) {
-          replyText = "網路不穩定，請再試一次";
+          replyText = "抱歉，現在網路不穩定，請稍後再試一次。";
         } else {
           replyText = JSON.stringify(data, null, 2);
         }
@@ -235,7 +235,7 @@ async function sendText(text, isRetry = false) {
       const finalErrorMsg = {
         id: uid(),
         role: "assistant",
-        text: "抱歉，現在網路不穩定，請稍後再試一次。",
+        text: "網路不穩定，請再試一次。",
         ts: Date.now(),
       };
       messages.push(finalErrorMsg);
