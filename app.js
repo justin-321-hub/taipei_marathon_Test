@@ -1,5 +1,5 @@
 /**
- * app.js — 前端純 JS 聊天室邏輯（獨立錯誤計數器版本）
+ * app.js — 前端純 JS 聊天室邏輯（移除 JSON 解析錯誤處理）
  */
 
 "use strict";
@@ -136,18 +136,16 @@ async function sendText(text, retryCounts = {}) {
 
   const contentToSend = processQuestionMarks(content);
 
-  // 初始化重試計數器
+  // 初始化重試計數器（移除 jsonParseError）
   if (!retryCounts.emptyResponse) retryCounts.emptyResponse = 0;
   if (!retryCounts.incompleteMarkers) retryCounts.incompleteMarkers = 0;
   if (!retryCounts.httpErrors) retryCounts.httpErrors = 0;
-  if (!retryCounts.jsonParseError) retryCounts.jsonParseError = 0;
 
   // 判斷是否為第一次請求
   const isFirstRequest = 
     retryCounts.emptyResponse === 0 && 
     retryCounts.incompleteMarkers === 0 && 
-    retryCounts.httpErrors === 0 &&
-    retryCounts.jsonParseError === 0;
+    retryCounts.httpErrors === 0;
 
   // 只在第一次呼叫時顯示使用者訊息並清空輸入框
   if (isFirstRequest) {
@@ -176,36 +174,15 @@ async function sendText(text, retryCounts = {}) {
 
     const raw = await res.text();
     let data;
-    let jsonParseSuccess = true;
     
+    // 簡化 JSON 解析，失敗時包裝成 errorRaw
     try {
       data = raw ? JSON.parse(raw) : {};
     } catch {
-      jsonParseSuccess = false;
       data = { errorRaw: raw };
     }
 
-    // ★★★ 6. JSON 解析錯誤處理 ★★★
-    if (!jsonParseSuccess && retryCounts.jsonParseError === 0) {
-      retryCounts.jsonParseError++;
-      setThinking(false);
-      const retryMsg = {
-        id: uid(),
-        role: "assistant",
-        text: "正在為您重新詢問。",
-        ts: Date.now(),
-      };
-      messages.push(retryMsg);
-      render();
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      return sendText(content, retryCounts);
-    }
-    
-    if (!jsonParseSuccess && retryCounts.jsonParseError >= 1) {
-      throw new Error("抱歉，現在網路不穩定，請稍後再試一次。");
-    }
-
-    // ★★★ 3. HTTP 500/502/503/504/401/404 錯誤處理 ★★★
+    // ★★★ HTTP 500/502/503/504/401/404 錯誤處理 ★★★
     const commonHttpErrors = [500, 502, 503, 504, 401, 404];
     if (commonHttpErrors.includes(res.status)) {
       if (retryCounts.httpErrors === 0) {
@@ -226,12 +203,12 @@ async function sendText(text, retryCounts = {}) {
       }
     }
 
-    // ★★★ 4. 其他 HTTP 錯誤 ★★★
+    // ★★★ 其他 HTTP 錯誤 ★★★
     if (!res.ok) {
       throw new Error("抱歉，現在網路不穩定，請稍後再試一次。");
     }
 
-    // ★★★ 1. HTTP 200 空回應錯誤處理 ★★★
+    // ★★★ HTTP 200 空回應錯誤處理 ★★★
     if (res.status === 200) {
       let isEmptyResponse = false;
       
@@ -282,101 +259,4 @@ async function sendText(text, retryCounts = {}) {
         if (textValue === "" || textValue === null || textValue === undefined) {
           replyText = "請換個說法，謝謝您";
         } else {
-          replyText = String(textValue).trim() || "請換個說法，謝謝您";
-        }
-      } else {
-        const isPlainEmptyObject =
-          !Array.isArray(data) &&
-          Object.keys(data).filter(k => k !== 'clientId').length === 0;
-        if (isPlainEmptyObject) {
-          replyText = "網路不穩定，請再試一次";
-        } else {
-          replyText = JSON.stringify(data, null, 2);
-        }
-      }
-    } else {
-      replyText = "請換個說法，謝謝您";
-    }
-
-    // ★★★ 2. 後端未完成處理錯誤 ★★★
-    if (containsIncompleteMarkers(replyText) && retryCounts.incompleteMarkers === 0) {
-      retryCounts.incompleteMarkers++;
-      setThinking(false);
-      const thinkingMsg = {
-        id: uid(),
-        role: "assistant",
-        text: "還在思考中，請稍等。",
-        ts: Date.now(),
-      };
-      messages.push(thinkingMsg);
-      render();
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      return sendText(content, retryCounts);
-    }
-
-    if (containsIncompleteMarkers(replyText) && retryCounts.incompleteMarkers >= 1) {
-      setThinking(false);
-      const errorMsg = {
-        id: uid(),
-        role: "assistant",
-        text: "抱歉，現在網路不穩定，請稍後再試一次。",
-        ts: Date.now(),
-      };
-      messages.push(errorMsg);
-      render();
-      return;
-    }
-
-    // 推入機器人訊息
-    const botMsg = { id: uid(), role: "assistant", text: replyText, ts: Date.now() };
-    messages.push(botMsg);
-    setThinking(false);
-    render();
-
-  } catch (err) {
-    setThinking(false);
-    
-    // ★★★ 5. 離線狀態檢查 ★★★
-    if (!navigator.onLine) {
-      const offlineMsg = {
-        id: uid(),
-        role: "assistant",
-        text: "目前處於離線狀態，請檢查網路連線後再試一次",
-        ts: Date.now(),
-      };
-      messages.push(offlineMsg);
-      render();
-      return;
-    }
-    
-    const friendly = `${err?.message || err}`;
-    const botErr = {
-      id: uid(),
-      role: "assistant",
-      text: friendly,
-      ts: Date.now(),
-    };
-    messages.push(botErr);
-    render();
-  }
-}
-
-// 事件綁定
-elBtnSend?.addEventListener("click", () => sendText());
-elInput?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    sendText();
-  }
-});
-
-window.addEventListener("load", () => elInput?.focus());
-
-// 歡迎訊息
-messages.push({
-  id: uid(),
-  role: "assistant",
-  text: "歡迎來到臺北馬拉松智慧客服！<br>我是小幫手，隨時為您解答~ 有什麼問題可以為您解答的嗎?",
-  ts: Date.now(),
-});
-render();
+          replyText = String(textValue).trim
